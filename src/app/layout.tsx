@@ -1,12 +1,11 @@
 import type { Metadata, Viewport } from "next";
-import Script from "next/script"; // <-- 1. IMPORT SCRIPT HERE
+import Script from "next/script"; 
 import "@/styles/globals.css";
 import { satoshi } from "@/styles/fonts";
 import TopNavbar from "@/components/layout/Navbar/TopNavbar";
 import Footer from "@/components/layout/Footer";
 import HolyLoader from "holy-loader";
 import Providers from "./providers";
-import SplashScreen from "@/components/common/SplashScreen";
 
 // --- RABINDRA STORE SEO & METADATA ---
 export const metadata: Metadata = {
@@ -28,7 +27,7 @@ export default function RootLayout({
       <body className={`${satoshi.className} bg-slate-50 antialiased text-slate-900`}>
         <HolyLoader color="#16a34a" /> 
         
-        <SplashScreen /> 
+        {/* Splash Screen Completely Removed */}
 
         <Providers>
           <TopNavbar />
@@ -39,7 +38,7 @@ export default function RootLayout({
         
         <Footer />
 
-        {/* --- 2. ADD GOOGLE ANALYTICS TAGS HERE --- */}
+        {/* --- GOOGLE ANALYTICS TAGS --- */}
         <Script 
           src="https://www.googletagmanager.com/gtag/js?id=G-R8WZYFHD1K" 
           strategy="afterInteractive" 

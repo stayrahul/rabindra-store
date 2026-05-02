@@ -11,6 +11,8 @@ export type CartItem = {
   unit: string;
   quantity: number;
   note?: string;
+  varients?: any[];
+  price: number; // <-- ADD THIS LINE
 };
 
 // Simplified State: We only care about items and total item count

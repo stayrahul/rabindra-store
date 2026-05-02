@@ -9,6 +9,11 @@ const config: Config = {
   ],
   theme: {
     extend: {
+      // FIX: Added this to silence the ambiguous easing warning in your terminal
+      transitionTimingFunction: {
+        'custom-ease': 'cubic-bezier(0.25, 1, 0.5, 1)',
+        'cb-ease': 'cubic-bezier(0.25, 1, 0.5, 1)',
+      },
       fontFamily: {
         integralCF: ["var(--font-integralCF)"],
         satoshi: ["var(--font-satoshi)"],
@@ -101,4 +106,5 @@ const config: Config = {
   plugins: [require("tailwindcss-animate")],
   safelist: ["backdrop-blur-[2px]"],
 };
+
 export default config;

@@ -9,4 +9,5 @@ export type Product = {
   units: string[];
   inStock: boolean;
   category?: string;
+  varients?: any[];
 };

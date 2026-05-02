@@ -8,7 +8,6 @@ export default function SplashScreen() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Reduced to 1.2s for a snappy, premium feel without frustrating the user
     const timer = setTimeout(() => setIsLoading(false), 1200);
     return () => clearTimeout(timer);
   }, []);
@@ -17,13 +16,15 @@ export default function SplashScreen() {
     <AnimatePresence>
       {isLoading && (
         <motion.div
-          exit={{ opacity: 0, scale: 1.05, filter: "blur(10px)" }}
+          // FIX 1: Removed the problematic filter: "blur(10px)" from the exit animation
+          exit={{ opacity: 0, scale: 1.05 }}
           transition={{ duration: 0.4, ease: "easeInOut" }}
-          className="fixed inset-0 z-[9999] bg-slate-50/90 backdrop-blur-2xl flex flex-col items-center justify-center"
+          // FIX 2: Removed backdrop-blur completely. Using a solid bg-slate-50.
+          // This guarantees 0% chance of Safari rendering glitches.
+          className="fixed inset-0 z-[9999] bg-slate-50 flex flex-col items-center justify-center"
         >
           <div className="relative flex flex-col items-center justify-center px-8">
             
-            {/* Minimalist Icon matching Navbar */}
             <motion.div
               initial={{ scale: 0.5, opacity: 0, rotate: -10 }}
               animate={{ scale: 1, opacity: 1, rotate: 0 }}
@@ -38,7 +39,6 @@ export default function SplashScreen() {
               </div>
             </motion.div>
 
-            {/* Consistent Branding */}
             <motion.div
               initial={{ y: 10, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
@@ -53,7 +53,6 @@ export default function SplashScreen() {
               </p>
             </motion.div>
             
-            {/* Lightning Fast Progress Line */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
