@@ -1,343 +1,424 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   FiSave, FiGlobe, FiTag, FiSliders, FiPhone, FiMail, FiMapPin, 
   FiShoppingBag, FiShield, FiTruck, FiBell, FiCreditCard, 
-  FiCheck, FiLoader, FiUsers, FiSearch, FiLock, FiAlertCircle
+  FiCheck, FiLoader, FiUsers, FiSearch, FiLock, FiAlertCircle,
+  FiPercent, FiZap, FiDatabase, FiRefreshCw, FiExternalLink
 } from "react-icons/fi";
 import CategoryManager from "./CategoryManager";
+import { supabase } from "@/utils/supabase";
 
-// The master database of your default settings
-const INITIAL_SETTINGS = {
-  // 1. General
+// MASTER SCHEMA: Every single configurable item in the store
+const DEFAULT_SCHEMA = {
+  // --- STORE IDENTITY ---
   storeName: "Rabindra Wholesale Mart",
   supportPhone: "+977 9860117783",
   supportEmail: "contact@rabindra.com",
   address: "Kathmandu, Nepal",
   adminName: "Sushant Kushwaha",
   timezone: "Asia/Kathmandu",
+  currency: "NPR",
   
-  // 2. B2B & Vendors
+  // --- WHOLESALE & B2B RULES ---
   requireApproval: true,
   hidePricesFromGuests: true,
   minOrderValue: "5000",
-  defaultNetTerms: "30", // Days to pay
+  defaultNetTerms: "30",
   maxCreditLimit: "500000",
   enableTieredPricing: true,
+  taxExemptForRegisteredVendors: false,
 
-  // 3. Logistics & Shipping
+  // --- LOGISTICS & FULFILLMENT ---
   baseShippingRate: "150",
   freeShippingThreshold: "15000",
   localPickup: true,
   deliveryRadiusKm: "50",
-  weightUnit: "kg",
+  estimatedDeliveryDays: "2",
   premiumPackagingEnabled: true,
+  packagingFee: "50",
 
-  // 4. Payments & Checkout
-  currency: "NPR",
+  // --- PAYMENTS & CHECKOUT ---
   taxRate: "13",
   orderPrefix: "RAB-",
   enableCOD: true,
   enableBankTransfer: true,
   enableDigitalWallets: false,
   allowPartialPayments: false,
+  depositPercentage: "50",
 
-  // 5. Notifications
+  // --- AUTOMATION & ALERTS ---
   emailNotifications: true,
   smsAlerts: false,
   adminAlertEmail: "admin@rabindra.com",
   lowStockAlerts: true,
   lowStockThreshold: "10",
   abandonedCartEmails: true,
+  autoArchiveOrders: false,
 
-  // 6. SEO & Web
+  // --- SEO & PERFORMANCE ---
   seoTitle: "Rabindra Wholesale | Premium B2B Supply",
   seoDescription: "The leading wholesale supplier for premium goods, packaging, and logistics in Nepal.",
-  googleAnalyticsId: "",
+  googleAnalyticsId: "G-R8WZYFHD1K",
   enableIndexing: true,
   socialShareImageUrl: "/images/og-banner.jpg",
+  enablePWA: true,
 
-  // 7. Security & System
+  // --- SECURITY & SYSTEM ---
   maintenance: false,
   hideOutOfStock: false,
   require2FA: false,
   sessionTimeoutMins: "120",
   forceStrongPasswords: true,
+  auditLogging: true,
 };
 
 export default function AdminSettings() {
   const [activeTab, setActiveTab] = useState("general");
+  const [settings, setSettings] = useState(DEFAULT_SCHEMA);
+  const [persistedSettings, setPersistedSettings] = useState(DEFAULT_SCHEMA);
   
-  // State Management
-  const [savedSettings, setSavedSettings] = useState(INITIAL_SETTINGS);
-  const [settings, setSettings] = useState(INITIAL_SETTINGS);
-  
-  // Save Action States
+  // UI Status
+  const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
 
-  // Deep compare to detect unsaved changes
-  useEffect(() => {
-    const isDifferent = JSON.stringify(settings) !== JSON.stringify(savedSettings);
-    setHasChanges(isDifferent);
-  }, [settings, savedSettings]);
+  // 1. DATA INITIALIZATION: Fetch from Supabase
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    const { data, error } = await supabase
+      .from('store_settings')
+      .select('data')
+      .single();
 
-  // Input Handlers
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
+    if (data?.data) {
+      // Merge with default schema to handle new settings updates
+      const merged = { ...DEFAULT_SCHEMA, ...data.data };
+      setSettings(merged);
+      setPersistedSettings(merged);
+    }
+    setIsLoading(false);
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // 2. CHANGE DETECTION
+  useEffect(() => {
+    const isChanged = JSON.stringify(settings) !== JSON.stringify(persistedSettings);
+    setHasChanges(isChanged);
+  }, [settings, persistedSettings]);
+
+  // 3. EVENT HANDLERS
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setSettings(prev => ({ ...prev, [name]: value }));
   };
 
-  const handleToggle = (key: keyof typeof settings) => {
-    setSettings(prev => ({ ...prev, [key]: !prev[key as keyof typeof settings] }));
+  const toggleBoolean = (key: keyof typeof settings) => {
+    setSettings(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  // The Master Save Function
   const handleSave = async () => {
-    if (!hasChanges) return;
+    if (!hasChanges || isSaving) return;
     setIsSaving(true);
     
-    // Simulate Supabase API Call
-    await new Promise(resolve => setTimeout(resolve, 1500)); 
-    
-    console.log("🚀 Payload Successfully Sent to Database:", settings);
-    
-    setSavedSettings(settings); // Sync the baseline
+    const { error } = await supabase
+      .from('store_settings')
+      .upsert({ id: 1, data: settings, updated_at: new Date() });
+
+    if (!error) {
+      setPersistedSettings(settings);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    }
     setIsSaving(false);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
   };
 
-  // Reusable Premium Components
-  const ToggleSwitch = ({ label, desc, stateKey }: { label: string, desc: string, stateKey: keyof typeof settings }) => (
-    <div className="flex items-center justify-between py-4 border-b border-slate-50 last:border-0 group">
-      <div className="pr-6">
-        <h4 className="font-bold text-slate-900 text-sm">{label}</h4>
-        <p className="text-xs font-medium text-slate-500 mt-1">{desc}</p>
-      </div>
-      <button 
-        onClick={() => handleToggle(stateKey)}
-        disabled={isSaving}
-        className={`shrink-0 w-14 h-8 flex items-center rounded-full p-1 transition-all duration-300 shadow-inner focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50 ${settings[stateKey] ? 'bg-indigo-500' : 'bg-slate-200 hover:bg-slate-300'}`}
-      >
-        <div className={`w-6 h-6 bg-white rounded-full shadow-md transform transition-transform duration-300 ${settings[stateKey] ? 'translate-x-6' : 'translate-x-0'}`}></div>
-      </button>
+  // --- REUSABLE UI COMPONENTS ---
+  const SectionHeader = ({ icon: Icon, title, desc }: any) => (
+    <div className="mb-8">
+      <h3 className="text-xl font-black text-slate-900 flex items-center gap-3">
+        <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl"><Icon size={20} /></div>
+        {title}
+      </h3>
+      <p className="text-sm text-slate-500 font-medium mt-1 ml-12">{desc}</p>
     </div>
   );
 
-  const TextInput = ({ label, name, type = "text", icon: Icon, placeholder = "" }: any) => (
-    <div className="space-y-2">
-      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">{label}</label>
+  const InputField = ({ label, name, type = "text", icon: Icon, placeholder = "" }: any) => (
+    <div className="space-y-2 group">
+      <label className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] ml-1 group-focus-within:text-indigo-500 transition-colors">{label}</label>
       <div className="relative">
-        {Icon && <Icon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />}
+        {Icon && <Icon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" />}
         <input 
-          type={type} name={name} value={settings[name as keyof typeof settings] as string} onChange={handleChange} placeholder={placeholder}
-          className={`w-full ${Icon ? 'pl-11' : 'pl-4'} pr-4 py-3.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-900 transition-all shadow-sm`} 
+          type={type} name={name} value={settings[name as keyof typeof settings] as string} 
+          onChange={handleInputChange} placeholder={placeholder}
+          className={`w-full ${Icon ? 'pl-11' : 'pl-4'} pr-4 py-3.5 rounded-2xl border-2 border-slate-100 bg-slate-50/50 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50/50 outline-none font-bold text-slate-900 transition-all shadow-sm`} 
         />
       </div>
     </div>
   );
 
+  const StatusToggle = ({ label, desc, stateKey }: { label: string, desc: string, stateKey: keyof typeof settings }) => (
+    <div className="flex items-center justify-between p-5 rounded-2xl border-2 border-slate-50 hover:border-indigo-100 hover:bg-indigo-50/20 transition-all group">
+      <div className="pr-6">
+        <h4 className="font-bold text-slate-900 text-sm group-hover:text-indigo-900">{label}</h4>
+        <p className="text-[11px] font-medium text-slate-500 mt-0.5">{desc}</p>
+      </div>
+      <button 
+        onClick={() => toggleBoolean(stateKey)}
+        className={`shrink-0 w-12 h-7 flex items-center rounded-full p-1 transition-all duration-300 ${settings[stateKey] ? 'bg-indigo-600 shadow-lg shadow-indigo-100' : 'bg-slate-200'}`}
+      >
+        <div className={`w-5 h-5 bg-white rounded-full shadow-sm transform transition-transform duration-300 ${settings[stateKey] ? 'translate-x-5' : 'translate-x-0'}`}></div>
+      </button>
+    </div>
+  );
+
   const TABS = [
-    { id: "general", label: "General", icon: FiGlobe },
-    { id: "b2b", label: "B2B Rules", icon: FiUsers },
+    { id: "general", label: "Identity", icon: FiGlobe },
+    { id: "pricing", label: "B2B Engine", icon: FiZap },
     { id: "logistics", label: "Logistics", icon: FiTruck },
     { id: "payments", label: "Payments", icon: FiCreditCard },
-    { id: "notifications", label: "Alerts", icon: FiBell },
-    { id: "seo", label: "SEO & Web", icon: FiSearch },
-    { id: "security", label: "Security", icon: FiShield },
-    { id: "categories", label: "Categories", icon: FiTag },
+    { id: "alerts", label: "Automation", icon: FiBell },
+    { id: "seo", label: "SEO/Web", icon: FiSearch },
+    { id: "security", label: "Failsafes", icon: FiShield },
+    { id: "categories", label: "Taxonomy", icon: FiTag },
   ];
 
+  if (isLoading) return (
+    <div className="h-96 flex items-center justify-center gap-3 text-slate-400 font-bold">
+      <FiLoader className="animate-spin text-indigo-500" size={24} /> 
+      Initialising Engine...
+    </div>
+  );
+
   return (
-    <div className="max-w-6xl space-y-8 pb-12">
+    <div className="max-w-6xl space-y-8 pb-12 selection:bg-indigo-100">
       
-      {/* Header & Save Bar */}
-      <div className="sticky top-0 z-40 bg-[#F8FAFC]/80 backdrop-blur-xl py-4 border-b border-slate-200/60 flex flex-col sm:flex-row sm:items-end justify-between gap-4 -mx-4 px-4 md:-mx-8 md:px-8">
+      {/* GLOBAL PERSISTENCE BAR */}
+      <div className="sticky top-0 z-40 bg-slate-50/80 backdrop-blur-xl py-5 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4 -mx-8 px-8">
         <div>
-          <h2 className="text-3xl font-black text-slate-900 tracking-tight">System Core</h2>
-          <div className="flex items-center gap-3 mt-1.5">
-            <p className="text-slate-500 text-sm font-medium">Manage 40+ global engine parameters.</p>
-            {hasChanges && <span className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wider text-amber-600 bg-amber-100 px-2.5 py-1 rounded-md animate-pulse"><FiAlertCircle /> Unsaved Changes</span>}
+          <h2 className="text-3xl font-black text-slate-900 tracking-tighter uppercase italic">System Core</h2>
+          <div className="flex items-center gap-3 mt-1">
+            <span className="text-[10px] font-black bg-slate-900 text-white px-2 py-0.5 rounded tracking-widest">PRO</span>
+            <p className="text-slate-500 text-xs font-bold">Rabindra Wholesale Global v3.1</p>
           </div>
         </div>
         
         {activeTab !== "categories" && (
-          <button 
-            onClick={handleSave}
-            disabled={isSaving || saveSuccess || !hasChanges}
-            className={`flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl font-black transition-all shadow-lg active:scale-95 disabled:active:scale-100 ${
-              saveSuccess ? "bg-emerald-500 text-white shadow-emerald-200" 
-              : hasChanges ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200 ring-2 ring-indigo-600 ring-offset-2 ring-offset-[#F8FAFC]" 
-              : "bg-slate-200 text-slate-400 shadow-none cursor-not-allowed"
-            }`}
-          >
-            {isSaving ? <FiLoader size={18} className="animate-spin" /> : saveSuccess ? <FiCheck size={18} /> : <FiSave size={18} />}
-            <span>{isSaving ? "Syncing..." : saveSuccess ? "Synced!" : "Save Configuration"}</span>
-          </button>
+          <div className="flex items-center gap-3">
+            <AnimatePresence>
+              {hasChanges && (
+                <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} className="hidden lg:flex items-center gap-2 text-amber-600 font-black text-[10px] uppercase tracking-widest bg-amber-50 px-4 py-2 rounded-xl">
+                  <FiAlertCircle /> Pending Changes
+                </motion.div>
+              )}
+            </AnimatePresence>
+            <button 
+              onClick={handleSave}
+              disabled={isSaving || saveSuccess || !hasChanges}
+              className={`flex items-center justify-center gap-2 px-10 py-4 rounded-2xl font-black transition-all active:scale-95 shadow-xl ${
+                saveSuccess ? "bg-emerald-500 text-white shadow-emerald-200" 
+                : hasChanges ? "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200" 
+                : "bg-slate-200 text-slate-400 cursor-not-allowed shadow-none"
+              }`}
+            >
+              {isSaving ? <FiLoader className="animate-spin" /> : saveSuccess ? <FiCheck /> : <FiSave />}
+              <span>{isSaving ? "Syncing..." : saveSuccess ? "System Updated!" : "Sync Engine"}</span>
+            </button>
+          </div>
         )}
       </div>
 
-      {/* Navigation */}
-      <div className="flex overflow-x-auto scrollbar-hide gap-2 p-1.5 bg-white/60 backdrop-blur-md rounded-2xl border border-slate-200/60 shadow-sm w-fit max-w-full">
+      {/* NAVIGATION NAV-DRAWER */}
+      <div className="flex overflow-x-auto scrollbar-hide gap-2 p-1.5 bg-slate-200/50 rounded-[2rem] border border-slate-200 shadow-inner w-fit max-w-full">
         {TABS.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`flex items-center gap-2.5 px-5 py-2.5 rounded-xl text-sm font-bold transition-all whitespace-nowrap ${
-              activeTab === tab.id ? "bg-slate-900 text-white shadow-md" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
+            className={`flex items-center gap-2.5 px-6 py-3 rounded-[1.5rem] text-xs font-black transition-all whitespace-nowrap uppercase tracking-wider ${
+              activeTab === tab.id ? "bg-white text-indigo-600 shadow-md" : "text-slate-500 hover:text-slate-900 hover:bg-slate-100"
             }`}
           >
-            <tab.icon size={16} strokeWidth={activeTab === tab.id ? 2.5 : 2} />
+            <tab.icon size={14} />
             {tab.label}
           </button>
         ))}
       </div>
 
-      {/* Content Area */}
+      {/* CONTENT ENGINE */}
       <div className="min-h-[600px]">
         <AnimatePresence mode="wait">
           <motion.div key={activeTab} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -15 }} transition={{ duration: 0.2 }}>
             
-            {/* 1. GENERAL TAB */}
+            {/* --- TAB 1: IDENTITY --- */}
             {activeTab === "general" && (
-              <div className="bg-white rounded-[2rem] p-6 sm:p-8 border border-slate-100 shadow-sm space-y-8">
-                <h3 className="text-xl font-black text-slate-900 flex items-center gap-2"><FiGlobe className="text-indigo-500" /> Store Identity</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  <TextInput label="Store Name" name="storeName" icon={FiShoppingBag} />
-                  <TextInput label="Admin Name" name="adminName" icon={FiShield} />
+              <div className="bg-white rounded-[2.5rem] p-10 border border-slate-100 shadow-sm space-y-10">
+                <SectionHeader icon={FiGlobe} title="Store Identity" desc="Primary contact and branding information for your storefront." />
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                  <InputField label="Public Store Name" name="storeName" icon={FiShoppingBag} />
+                  <InputField label="Super Admin Name" name="adminName" icon={FiShield} />
                   <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Timezone</label>
-                    <select name="timezone" value={settings.timezone} onChange={handleChange} className="w-full px-4 py-3.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-900 transition-all shadow-sm">
-                      <option value="Asia/Kathmandu">Asia/Kathmandu (+05:45)</option>
-                      <option value="Asia/Kolkata">Asia/Kolkata (+05:30)</option>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Default Currency</label>
+                    <select name="currency" value={settings.currency} onChange={handleInputChange} className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 bg-slate-50/50 font-bold text-slate-900 focus:border-indigo-500 transition-all outline-none">
+                      <option value="NPR">NPR (Rs.)</option>
+                      <option value="INR">INR (₹)</option>
+                      <option value="USD">USD ($)</option>
                     </select>
                   </div>
-                  <TextInput label="Support Phone" name="supportPhone" icon={FiPhone} />
-                  <TextInput label="Support Email" name="supportEmail" icon={FiMail} />
-                  <TextInput label="Physical Address" name="address" icon={FiMapPin} />
+                  <InputField label="Support Line" name="supportPhone" icon={FiPhone} />
+                  <InputField label="Official Email" name="supportEmail" icon={FiMail} />
+                  <InputField label="Base Warehouse Address" name="address" icon={FiMapPin} />
                 </div>
               </div>
             )}
 
-            {/* 2. B2B & VENDORS */}
-            {activeTab === "b2b" && (
+            {/* --- TAB 2: B2B ENGINE (PRICING) --- */}
+            {activeTab === "pricing" && (
               <div className="space-y-6">
-                <div className="bg-white rounded-[2rem] p-6 sm:p-8 border border-slate-100 shadow-sm space-y-4">
-                  <h3 className="text-xl font-black text-slate-900 flex items-center gap-2 mb-6"><FiUsers className="text-indigo-500" /> B2B Access Rules</h3>
-                  <ToggleSwitch stateKey="requireApproval" label="Require Vendor Approval" desc="New registrations must be manually vetted by an admin." />
-                  <ToggleSwitch stateKey="hidePricesFromGuests" label="Hide Prices from Guests" desc="Unregistered users can see the catalog, but not pricing." />
-                  <ToggleSwitch stateKey="enableTieredPricing" label="Enable Tiered Bulk Pricing" desc="Offer dynamic discounts based on volume purchased." />
+                <div className="bg-white rounded-[2.5rem] p-10 border border-slate-100 shadow-sm">
+                  <SectionHeader icon={FiZap} title="B2B Pricing Engine" desc="Control how wholesale vendors interact with your pricing." />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <StatusToggle stateKey="requireApproval" label="Manual Vetting" desc="Admins must approve every new vendor account." />
+                    <StatusToggle stateKey="hidePricesFromGuests" label="Price Gating" desc="Hide prices until the user is logged in as a vendor." />
+                    <StatusToggle stateKey="enableTieredPricing" label="Tiered Bulk Pricing" desc="Enable automatic discounts for higher volumes." />
+                    <StatusToggle stateKey="taxExemptForRegisteredVendors" label="VAT Exemption" desc="Skip tax for vendors with verified PAN/VAT numbers." />
+                  </div>
                 </div>
-                <div className="bg-white rounded-[2rem] p-6 sm:p-8 border border-slate-100 shadow-sm space-y-6">
-                  <h3 className="text-xl font-black text-slate-900">Wholesale Financials</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <TextInput label="Min Order Value (Rs.)" name="minOrderValue" type="number" />
-                    <TextInput label="Default Net Terms (Days)" name="defaultNetTerms" type="number" placeholder="e.g., 30 for Net-30" />
-                    <TextInput label="Max Credit Limit (Rs.)" name="maxCreditLimit" type="number" />
+                <div className="bg-white rounded-[2.5rem] p-10 border border-slate-100 shadow-sm">
+                  <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6">Financial Thresholds</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <InputField label="Min. Order Value" name="minOrderValue" type="number" />
+                    <InputField label="Default Net Terms" name="defaultNetTerms" type="number" placeholder="Days" />
+                    <InputField label="Max Account Credit" name="maxCreditLimit" type="number" />
                   </div>
                 </div>
               </div>
             )}
 
-            {/* 3. LOGISTICS */}
+            {/* --- TAB 3: LOGISTICS --- */}
             {activeTab === "logistics" && (
-              <div className="space-y-6">
-                <div className="bg-white rounded-[2rem] p-6 sm:p-8 border border-slate-100 shadow-sm space-y-6">
-                  <h3 className="text-xl font-black text-slate-900 flex items-center gap-2 mb-6"><FiTruck className="text-indigo-500" /> Shipping & Fulfillment</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <TextInput label="Base Rate (Rs.)" name="baseShippingRate" type="number" />
-                    <TextInput label="Free Delivery Threshold" name="freeShippingThreshold" type="number" />
-                    <TextInput label="Delivery Radius (Km)" name="deliveryRadiusKm" type="number" />
-                  </div>
+              <div className="bg-white rounded-[2.5rem] p-10 border border-slate-100 shadow-sm space-y-10">
+                <SectionHeader icon={FiTruck} title="Logistics & Fulfillment" desc="Manage shipping rates, zones, and packaging fees." />
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+                  <InputField label="Base Delivery (Rs.)" name="baseShippingRate" type="number" />
+                  <InputField label="Free Delivery At" name="freeShippingThreshold" type="number" />
+                  <InputField label="Delivery Radius (Km)" name="deliveryRadiusKm" type="number" />
+                  <InputField label="Est. Lead Time (Days)" name="estimatedDeliveryDays" type="number" />
                 </div>
-                <div className="bg-white rounded-[2rem] p-6 sm:p-8 border border-slate-100 shadow-sm space-y-4">
-                  <ToggleSwitch stateKey="localPickup" label="Allow Warehouse Pickup" desc="Vendors can collect goods directly from your location." />
-                  <ToggleSwitch stateKey="premiumPackagingEnabled" label="Premium Packaging Option" desc="Allow customers to request hygienic/gift packaging at checkout." />
+                <div className="pt-6 border-t border-slate-50 space-y-4">
+                  <StatusToggle stateKey="localPickup" label="Allow Warehouse Pickup" desc="Vendors can skip shipping and collect in person." />
+                  <StatusToggle stateKey="premiumPackagingEnabled" label="Premium Packaging" desc="Enable high-quality, hygienic packaging options." />
+                  {settings.premiumPackagingEnabled && <InputField label="Packaging Fee (Rs.)" name="packagingFee" type="number" />}
                 </div>
               </div>
             )}
 
-            {/* 4. PAYMENTS */}
+            {/* --- TAB 4: PAYMENTS --- */}
             {activeTab === "payments" && (
-              <div className="space-y-6">
-                <div className="bg-white rounded-[2rem] p-6 sm:p-8 border border-slate-100 shadow-sm space-y-6">
-                  <h3 className="text-xl font-black text-slate-900 flex items-center gap-2 mb-6"><FiCreditCard className="text-indigo-500" /> Checkout & Tax</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <TextInput label="Currency Setup" name="currency" />
-                    <TextInput label="Tax Rate (%)" name="taxRate" type="number" />
-                    <TextInput label="Order ID Prefix" name="orderPrefix" placeholder="e.g., RAB-" />
-                  </div>
+              <div className="bg-white rounded-[2.5rem] p-10 border border-slate-100 shadow-sm space-y-10">
+                <SectionHeader icon={FiCreditCard} title="Checkout & Payments" desc="Configure your payment gateway and tax settings." />
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                  <InputField label="Standard Tax Rate (%)" name="taxRate" type="number" />
+                  <InputField label="Order ID Prefix" name="orderPrefix" />
+                  <InputField label="Deposit Required (%)" name="depositPercentage" type="number" />
                 </div>
-                <div className="bg-white rounded-[2rem] p-6 sm:p-8 border border-slate-100 shadow-sm space-y-4">
-                  <ToggleSwitch stateKey="enableCOD" label="Cash on Delivery (COD)" desc="Standard payment on arrival." />
-                  <ToggleSwitch stateKey="enableBankTransfer" label="Direct Bank Transfer" desc="B2B wire instructions provided at checkout." />
-                  <ToggleSwitch stateKey="enableDigitalWallets" label="Digital Wallets (eSewa/Khalti)" desc="Process mobile payments directly." />
-                  <ToggleSwitch stateKey="allowPartialPayments" label="Allow Partial Deposits" desc="Vendors can pay a percentage upfront to secure stock." />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <StatusToggle stateKey="enableCOD" label="Cash on Delivery" desc="Standard offline payment method." />
+                  <StatusToggle stateKey="enableBankTransfer" label="Direct Bank Transfer" desc="B2B wire transfer instructions." />
+                  <StatusToggle stateKey="enableDigitalWallets" label="Digital Wallets" desc="eSewa / Khalti integration." />
+                  <StatusToggle stateKey="allowPartialPayments" label="Installment Plans" desc="Allow customers to pay deposit first." />
                 </div>
               </div>
             )}
 
-            {/* 5. NOTIFICATIONS */}
-            {activeTab === "notifications" && (
-              <div className="bg-white rounded-[2rem] p-6 sm:p-8 border border-slate-100 shadow-sm space-y-4">
-                <h3 className="text-xl font-black text-slate-900 flex items-center gap-2 mb-6"><FiBell className="text-indigo-500" /> Automated Alerts</h3>
-                <TextInput label="Admin Alert Email Receiver" name="adminAlertEmail" icon={FiMail} />
-                <div className="pt-4 space-y-2">
-                  <ToggleSwitch stateKey="emailNotifications" label="Order Email Receipts" desc="Automatically send invoices to vendors." />
-                  <ToggleSwitch stateKey="smsAlerts" label="SMS Dispatch Alerts" desc="Text customers when a truck leaves the warehouse." />
-                  <ToggleSwitch stateKey="abandonedCartEmails" label="Abandoned Cart Recovery" desc="Email vendors who leave items in their cart for 24 hours." />
-                  <ToggleSwitch stateKey="lowStockAlerts" label="Low Stock Warning System" desc="Notify admins when inventory dips." />
+            {/* --- TAB 5: AUTOMATION --- */}
+            {activeTab === "alerts" && (
+              <div className="bg-white rounded-[2.5rem] p-10 border border-slate-100 shadow-sm space-y-6">
+                <SectionHeader icon={FiBell} title="System Automation" desc="Set up automatic notifications and inventory alerts." />
+                <InputField label="Admin Alert Target Email" name="adminAlertEmail" icon={FiMail} />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-6">
+                  <StatusToggle stateKey="emailNotifications" label="Auto-Invoice Emails" desc="Instantly email invoices upon order confirmation." />
+                  <StatusToggle stateKey="smsAlerts" label="SMS Tracking Alerts" desc="Send dispatch texts to customers." />
+                  <StatusToggle stateKey="lowStockAlerts" label="Inventory Watchdog" desc="Alert admin when items fall below threshold." />
+                  <StatusToggle stateKey="abandonedCartEmails" label="Cart Recovery" desc="Follow up with vendors who leave items in carts." />
                 </div>
                 {settings.lowStockAlerts && (
-                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="pt-2">
-                    <TextInput label="Trigger Alert Below (Units)" name="lowStockThreshold" type="number" />
+                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="p-6 bg-slate-50 rounded-2xl">
+                    <InputField label="Low Stock Warning Trigger (Units)" name="lowStockThreshold" type="number" />
                   </motion.div>
                 )}
               </div>
             )}
 
-            {/* 6. SEO & WEB */}
+            {/* --- TAB 6: SEO --- */}
             {activeTab === "seo" && (
-              <div className="bg-white rounded-[2rem] p-6 sm:p-8 border border-slate-100 shadow-sm space-y-6">
-                <h3 className="text-xl font-black text-slate-900 flex items-center gap-2 mb-6"><FiSearch className="text-indigo-500" /> Search Optimization</h3>
-                <TextInput label="Meta Title" name="seoTitle" />
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider pl-1">Meta Description</label>
-                  <textarea name="seoDescription" value={settings.seoDescription} onChange={handleChange} rows={3} className="w-full px-4 py-3.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-slate-900 transition-all shadow-sm resize-none" />
+              <div className="bg-white rounded-[2.5rem] p-10 border border-slate-100 shadow-sm space-y-10">
+                <SectionHeader icon={FiSearch} title="SEO & Performance" desc="Optimise how your store appears on Google and Social Media." />
+                <div className="space-y-6">
+                  <InputField label="Homepage Meta Title" name="seoTitle" />
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Homepage Meta Description</label>
+                    <textarea name="seoDescription" value={settings.seoDescription} onChange={handleInputChange} rows={3} className="w-full px-4 py-3.5 rounded-2xl border-2 border-slate-100 bg-slate-50/50 font-bold text-slate-900 focus:border-indigo-500 transition-all outline-none resize-none" />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <InputField label="GA4 Measurement ID" name="googleAnalyticsId" placeholder="G-XXXXXXXXXX" />
+                    <InputField label="OG Image URL" name="socialShareImageUrl" placeholder="/images/banner.jpg" />
+                  </div>
+                  <div className="flex flex-col gap-4">
+                    <StatusToggle stateKey="enableIndexing" label="Google Indexing" desc="Allow search engines to crawl and list your store." />
+                    <StatusToggle stateKey="enablePWA" label="PWA Installation" desc="Allow users to install your store as a mobile app." />
+                  </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <TextInput label="Google Analytics ID" name="googleAnalyticsId" placeholder="G-XXXXXXXXXX" />
-                  <TextInput label="Social Share Image (URL)" name="socialShareImageUrl" placeholder="/images/banner.jpg" />
-                </div>
-                <ToggleSwitch stateKey="enableIndexing" label="Allow Search Engine Indexing" desc="Let Google and Bing crawl your storefront." />
               </div>
             )}
 
-            {/* 7. SECURITY */}
+            {/* --- TAB 7: SECURITY --- */}
             {activeTab === "security" && (
-              <div className="bg-white rounded-[2rem] p-6 sm:p-8 border border-slate-100 shadow-sm space-y-4">
-                <h3 className="text-xl font-black text-slate-900 flex items-center gap-2 mb-6"><FiLock className="text-rose-500" /> Core Security & Failsafes</h3>
-                <ToggleSwitch stateKey="maintenance" label="Maintenance Mode (Store Lockout)" desc="Shut down the frontend to users while updating." />
-                <ToggleSwitch stateKey="hideOutOfStock" label="Hide Empty Inventory" desc="Automatically pull sold-out items from the public catalog." />
-                <ToggleSwitch stateKey="require2FA" label="Enforce 2FA for Admins" desc="Require two-factor authentication for backend access." />
-                <ToggleSwitch stateKey="forceStrongPasswords" label="Enforce Strong Passwords" desc="Require numbers, symbols, and caps for vendor accounts." />
-                <div className="pt-4">
-                  <TextInput label="Admin Session Timeout (Minutes)" name="sessionTimeoutMins" type="number" />
+              <div className="bg-white rounded-[2.5rem] p-10 border border-slate-100 shadow-sm space-y-10">
+                <SectionHeader icon={FiLock} title="Core Failsafes" desc="Manage system availability and admin security." />
+                <div className="flex flex-col gap-4">
+                  <StatusToggle stateKey="maintenance" label="Maintenance Mode" desc="Lock storefront for everyone except admins." />
+                  <StatusToggle stateKey="hideOutOfStock" label="Smart Inventory" desc="Hide products automatically when stock hits zero." />
+                  <StatusToggle stateKey="require2FA" label="Admin Multi-Factor" desc="Enforce 2FA for all dashboard users." />
+                  <StatusToggle stateKey="auditLogging" label="Audit Trails" desc="Log every single change made in the admin panel." />
+                </div>
+                <div className="pt-6 border-t border-slate-50">
+                  <InputField label="Admin Session Timeout (Minutes)" name="sessionTimeoutMins" type="number" />
                 </div>
               </div>
             )}
 
-            {/* 8. CATEGORIES */}
+            {/* --- TAB 8: CATEGORIES --- */}
             {activeTab === "categories" && (
               <div className="bg-transparent"><CategoryManager /></div>
             )}
 
           </motion.div>
         </AnimatePresence>
+      </div>
+
+      {/* FOOTER UTILITIES */}
+      <div className="flex items-center justify-between p-6 bg-slate-100/50 rounded-3xl border border-slate-200">
+        <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+          Last Sync: {new Date(persistedSettings === DEFAULT_SCHEMA ? Date.now() : Date.now()).toLocaleTimeString()}
+        </p>
+        <button 
+          onClick={() => {
+            const blob = new Blob([JSON.stringify(settings, null, 2)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `rabindra-settings-backup-${new Date().toISOString().split('T')[0]}.json`;
+            a.click();
+          }}
+          className="text-[10px] font-black text-indigo-600 hover:text-indigo-800 uppercase tracking-[0.2em] flex items-center gap-2"
+        >
+          <FiDatabase /> Export Backup
+        </button>
       </div>
     </div>
   );
