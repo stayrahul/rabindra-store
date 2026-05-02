@@ -6,8 +6,7 @@ import TopNavbar from "@/components/layout/Navbar/TopNavbar";
 import Footer from "@/components/layout/Footer";
 import HolyLoader from "holy-loader";
 import Providers from "./providers";
-import SplashScreen from "@/SplashScreen"
-
+import SplashScreen from "@/components/common/SplashScreen";
 // --- RABINDRA STORE SEO & METADATA ---
 export const metadata: Metadata = {
   title: "Rabindra Store | Simraungadh Wholesale",
