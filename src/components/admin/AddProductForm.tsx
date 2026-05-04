@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { 
   FiUploadCloud, FiPlus, FiTrash2, FiAlertCircle, FiRefreshCw, 
-  FiChevronDown, FiImage, FiStar, FiZap, FiCheckCircle, FiDollarSign 
+  FiChevronDown, FiImage, FiStar, FiZap, FiCheckCircle, FiDollarSign,
+  FiPackage, FiInfo
 } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
@@ -12,13 +13,26 @@ import { useInventory } from "@/context/InventoryContext";
 const CLOUDINARY_CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || "dtoyfm9xk";
 const CLOUDINARY_UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "Rabindra-store";
 
-// Define the new Variant structure
 interface ProductVariant {
   unit: string;
   price: string;
   showPrice: boolean;
 }
 
+// --- REUSABLE UI COMPONENTS ---
+const InputField = ({ label, value, onChange, placeholder, type = "text", required = false }: any) => (
+  <div className="w-full">
+    <label className="block text-sm font-bold text-slate-700 mb-2">
+      {label} {required && <span className="text-rose-500">*</span>}
+    </label>
+    <input 
+      type={type} value={value} onChange={onChange} placeholder={placeholder}
+      className="w-full px-5 py-4 rounded-2xl border-2 border-slate-100 bg-slate-50/50 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50/50 outline-none transition-all font-bold text-slate-900" 
+    />
+  </div>
+);
+
+// --- MAIN FORM ---
 export default function AddProductForm({ onSuccess, initialData }: any) {
   const { addProduct, updateProduct, categories } = useInventory(); 
   
@@ -28,8 +42,8 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
   const [description, setDescription] = useState(initialData?.description || "");
   const [category, setCategory] = useState(initialData?.category || categories[0] || "Uncategorized");
   const [imageUrl, setImageUrl] = useState<string | null>(initialData?.imageUrl || null);
+  const [inStock, setInStock] = useState<boolean>(initialData?.inStock ?? true);
   
-  // UPGRADE: Handle new variant structure with backward compatibility for old "units" array
   const [variants, setVariants] = useState<ProductVariant[]>(
     initialData?.variants || 
     (initialData?.units 
@@ -38,15 +52,16 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
   );
   
   const [isUploading, setIsUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const [isGeneratingLocal, setIsGeneratingLocal] = useState(false); 
   const [isGeneratingEn, setIsGeneratingEn] = useState(false);       
   const [error, setError] = useState("");
 
   const isEditMode = !!initialData;
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // --- IMAGE UPLOAD LOGIC ---
+  const processImage = async (file: File) => {
     setIsUploading(true);
     setError("");
     const formData = new FormData();
@@ -64,11 +79,20 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
     }
   };
 
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files?.[0]) processImage(e.target.files[0]);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files?.[0]) processImage(e.dataTransfer.files[0]);
+  };
+
   // --- AI GENERATION LOGIC ---
   const handleGenerateFromLocal = async () => {
     if (!localName || localName.length < 2) return setError("Please enter a local word first.");
-    setIsGeneratingLocal(true);
-    setError("");
+    setIsGeneratingLocal(true); setError("");
     try {
       const response = await fetch('/api/generate-details', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'from-local', query: localName, categories })
@@ -81,15 +105,12 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
       if (data.category && categories.includes(data.category)) setCategory(data.category);
     } catch (err) {
       setError("Could not generate details. Please try manually.");
-    } finally {
-      setIsGeneratingLocal(false);
-    }
+    } finally { setIsGeneratingLocal(false); }
   };
 
   const handleGenerateFromEnglish = async () => {
     if (!nameEn || nameEn.length < 2) return setError("Please enter an English name first.");
-    setIsGeneratingEn(true);
-    setError("");
+    setIsGeneratingEn(true); setError("");
     try {
       const response = await fetch('/api/generate-details', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'from-english', query: nameEn })
@@ -100,9 +121,7 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
       if (data.description && !description) setDescription(data.description);
     } catch (err) {
       setError("Could not generate details. Please try manually.");
-    } finally {
-      setIsGeneratingEn(false);
-    }
+    } finally { setIsGeneratingEn(false); }
   };
 
   // --- VARIANT MANAGEMENT ---
@@ -116,22 +135,20 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
     if (!nameEn) return setError("English name is required.");
     if (!imageUrl) return setError("Please upload a product photo.");
     
-    // Clean variants (remove empties)
     const validVariants = variants.filter(v => v.unit.trim() !== "");
     if (validVariants.length === 0) return setError("Please add at least one valid packaging size/unit.");
+    
+    // Validate priced variants
+    const hasInvalidPrice = validVariants.some(v => v.showPrice && (!v.price || Number(v.price) <= 0));
+    if (hasInvalidPrice) return setError("One or more variants are set to 'Priced' but lack a valid amount.");
     
     setError("");
 
     const productData = {
       id: isEditMode ? initialData.id : "prod_" + Date.now(), 
-      nameEn, 
-      nameNp, 
-      category, 
-      description,
-      variants: validVariants, // UPGRADED: Saving full objects now
-      units: validVariants.map(v => v.unit), // Extract units for backwards compatibility
-      imageUrl,
-      inStock: isEditMode ? (initialData?.inStock ?? true) : true,
+      nameEn, nameNp, category, description, imageUrl, inStock,
+      variants: validVariants, 
+      units: validVariants.map(v => v.unit), // Backwards compatibility
     };
 
     isEditMode ? await updateProduct(productData.id, productData) : await addProduct(productData);
@@ -145,19 +162,33 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
       <div className="w-full xl:w-[65%] flex flex-col gap-8 order-1">
         
         {/* Header */}
-        <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-200/60">
-          <h2 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight">{isEditMode ? "Edit Product" : "Add New Item"}</h2>
-          <p className="text-slate-500 mt-2 text-base">Configure pricing, packaging variants, and auto-fill details via AI.</p>
-          <AnimatePresence>
-            {error && (
-              <motion.div initial={{ opacity: 0, height: 0, y: -10 }} animate={{ opacity: 1, height: "auto", y: 0 }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-                <div className="mt-6 p-4 bg-red-50 text-red-600 rounded-2xl flex items-center gap-3 text-sm font-bold border border-red-100">
-                  <FiAlertCircle className="text-xl shrink-0" /> {error}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+        <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-200/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h2 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight">{isEditMode ? "Edit Product" : "Add New Item"}</h2>
+            <p className="text-slate-500 mt-2 text-base">Configure pricing, packaging, and auto-fill details via AI.</p>
+          </div>
+          
+          {/* UPGRADE: Inventory Status Toggle */}
+          <button 
+            onClick={() => setInStock(!inStock)}
+            className={`shrink-0 flex items-center gap-2 px-5 py-3 rounded-2xl font-black text-sm uppercase tracking-widest transition-all ${
+              inStock ? "bg-emerald-50 text-emerald-600 border-2 border-emerald-200 hover:bg-emerald-100" : "bg-rose-50 text-rose-600 border-2 border-rose-200 hover:bg-rose-100"
+            }`}
+          >
+            <div className={`w-2.5 h-2.5 rounded-full ${inStock ? "bg-emerald-500 animate-pulse" : "bg-rose-500"}`} />
+            {inStock ? "In Stock" : "Out of Stock"}
+          </button>
         </div>
+
+        <AnimatePresence>
+          {error && (
+            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}>
+              <div className="p-5 bg-rose-50 text-rose-700 rounded-2xl flex items-center gap-3 text-sm font-bold border border-rose-200 shadow-sm">
+                <FiAlertCircle className="text-xl shrink-0" /> {error}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* STEP 1: AI LOCAL WORD ASSISTANT */}
         <div className="bg-gradient-to-br from-indigo-600 via-purple-600 to-fuchsia-700 p-8 rounded-[2rem] shadow-xl shadow-indigo-200/50 relative overflow-hidden group">
@@ -176,22 +207,18 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
 
         {/* STEP 2: PRODUCT IDENTITY */}
         <div className="bg-white p-8 rounded-[2rem] shadow-sm border border-slate-200/60 space-y-8">
-          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-4">Product Identity</h3>
+          <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest border-b border-slate-100 pb-4 flex items-center gap-2"><FiInfo /> Product Identity</h3>
+          
           <div className="flex flex-col sm:flex-row gap-5 items-end">
-            <div className="w-full">
-              <label className="block text-sm font-bold text-slate-700 mb-2">Standard English Name *</label>
-              <input type="text" value={nameEn} onChange={(e) => setNameEn(e.target.value)} className="w-full px-5 py-4 rounded-2xl border-2 border-slate-100 bg-slate-50/50 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50/50 outline-none transition-all font-bold text-slate-900" placeholder="e.g. Premium Basmati Rice" />
-            </div>
-            <button onClick={handleGenerateFromEnglish} disabled={isGeneratingEn || !nameEn} className="w-full sm:w-auto shrink-0 bg-indigo-50/80 text-indigo-700 border border-indigo-100 px-6 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-indigo-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            <InputField label="Standard English Name" required value={nameEn} onChange={(e: any) => setNameEn(e.target.value)} placeholder="e.g. Premium Basmati Rice" />
+            <button onClick={handleGenerateFromEnglish} disabled={isGeneratingEn || !nameEn} className="w-full sm:w-auto shrink-0 bg-indigo-50/80 text-indigo-700 border border-indigo-100 px-6 py-4 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-indigo-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed h-[56px]">
               {isGeneratingEn ? <FiRefreshCw className="animate-spin" /> : <FiStar />} Magic Fill
             </button>
           </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2">Nepali Name</label>
-              <input type="text" value={nameNp} onChange={(e) => setNameNp(e.target.value)} className="w-full px-5 py-4 rounded-2xl border-2 border-slate-100 bg-slate-50/50 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50/50 outline-none transition-all font-bold text-slate-900" placeholder="e.g. बासमती चामल" />
-            </div>
-            <div>
+            <InputField label="Nepali Name" value={nameNp} onChange={(e: any) => setNameNp(e.target.value)} placeholder="e.g. बासमती चामल" />
+            <div className="w-full">
               <label className="block text-sm font-bold text-slate-700 mb-2">Category</label>
               <div className="relative">
                 <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full px-5 py-4 rounded-2xl border-2 border-slate-100 bg-slate-50/50 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50/50 outline-none transition-all font-bold text-slate-900 appearance-none cursor-pointer">
@@ -201,19 +228,26 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
               </div>
             </div>
           </div>
+
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">Product Description</label>
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} className="w-full px-5 py-4 rounded-2xl border-2 border-slate-100 bg-slate-50/50 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50/50 outline-none transition-all font-medium text-slate-800 resize-none leading-relaxed" placeholder="Highlight origin, quality, and minimum order requirements..." />
           </div>
         </div>
 
-        {/* STEP 3: MEDIA & UPGRADED VARIANT GRID */}
+        {/* STEP 3: MEDIA & VARIANT GRID */}
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
           
-          {/* PHOTO UPLOAD */}
+          {/* UPGRADE: TRUE DRAG & DROP PHOTO UPLOAD */}
           <div className="xl:col-span-4 bg-white p-6 md:p-8 rounded-[2rem] shadow-sm border border-slate-200/60 flex flex-col">
             <label className="block text-xs font-black text-slate-400 mb-4 uppercase tracking-widest">Product Photo *</label>
-            <div className={`relative w-full flex-1 min-h-[16rem] rounded-[1.5rem] border-2 border-dashed transition-all flex flex-col items-center justify-center overflow-hidden cursor-pointer group ${imageUrl ? 'border-indigo-200 bg-indigo-50/20' : 'border-slate-300 bg-slate-50 hover:bg-indigo-50/50 hover:border-indigo-300'}`}>
+            <div 
+              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`relative w-full flex-1 min-h-[16rem] rounded-[1.5rem] border-2 border-dashed transition-all flex flex-col items-center justify-center overflow-hidden cursor-pointer group ${isDragging ? 'border-indigo-500 bg-indigo-50 scale-[0.98]' : imageUrl ? 'border-indigo-200 bg-indigo-50/20' : 'border-slate-300 bg-slate-50 hover:bg-indigo-50/50 hover:border-indigo-300'}`}
+            >
               {isUploading ? (
                 <div className="flex flex-col items-center gap-4">
                   <FiRefreshCw className="animate-spin text-4xl text-indigo-500" />
@@ -228,66 +262,59 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
                 </>
               ) : (
                 <div className="text-center px-4 transition-transform duration-300 group-hover:-translate-y-1">
-                  <div className="w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center mx-auto mb-4 border border-slate-100 text-slate-400 group-hover:text-indigo-600 transition-colors"><FiUploadCloud className="w-8 h-8" /></div>
-                  <p className="text-sm font-bold text-slate-700">Tap or drag photo</p>
+                  <div className={`w-16 h-16 bg-white rounded-2xl shadow-sm flex items-center justify-center mx-auto mb-4 border transition-colors ${isDragging ? 'border-indigo-500 text-indigo-600' : 'border-slate-100 text-slate-400 group-hover:text-indigo-600'}`}>
+                    <FiUploadCloud className="w-8 h-8" />
+                  </div>
+                  <p className="text-sm font-bold text-slate-700">Drop photo here</p>
+                  <p className="text-xs text-slate-400 mt-1">or click to browse</p>
                 </div>
               )}
-              <input type="file" accept="image/*" onChange={handleImageUpload} disabled={isUploading} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed" />
+              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageUpload} disabled={isUploading} className="hidden" />
             </div>
           </div>
 
-          {/* UPGRADED VARIANT PRICING */}
+          {/* VARIANT PRICING */}
           <div className="xl:col-span-8 bg-white p-6 md:p-8 rounded-[2rem] shadow-sm border border-slate-200/60 flex flex-col">
             <div className="flex items-center justify-between mb-6">
-              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest">Pricing & Variants</label>
+              <label className="block text-xs font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><FiPackage /> Pricing & Variants</label>
               <span className="text-[10px] bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold uppercase tracking-wider">Dynamic</span>
             </div>
             
-            <div className="space-y-4 w-full flex-1">
+            <div className="space-y-3 w-full flex-1">
               <AnimatePresence>
                 {variants.map((variant, i) => (
-                  <motion.div layout key={i} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }} 
-                    className="flex flex-col sm:flex-row items-center gap-3 w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl"
+                  <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }} 
+                    key={i} className="flex flex-col sm:flex-row items-center gap-3 w-full p-3 bg-slate-50 border border-slate-200 rounded-2xl"
                   >
-                    {/* Unit Name Input */}
                     <input 
-                      type="text" 
-                      value={variant.unit} 
-                      onChange={(e) => updateVariant(i, "unit", e.target.value)} 
+                      type="text" value={variant.unit} onChange={(e) => updateVariant(i, "unit", e.target.value)} 
                       className="w-full sm:flex-1 min-w-0 px-4 py-3 rounded-xl border border-slate-200 bg-white focus:ring-2 focus:ring-indigo-500 font-bold text-slate-800 text-sm outline-none transition-all" 
                       placeholder="Size (e.g. 1kg, 25kg Sack)" 
                     />
                     
                     <div className="flex w-full sm:w-auto items-center gap-3">
-                      {/* Price Toggle */}
                       <button 
                         onClick={() => updateVariant(i, "showPrice", !variant.showPrice)}
                         className={`shrink-0 flex items-center justify-center gap-1.5 px-4 py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all w-full sm:w-auto ${
-                          variant.showPrice 
-                            ? "bg-emerald-100 text-emerald-700 border border-emerald-200" 
-                            : "bg-slate-200 text-slate-500 border border-slate-300"
+                          variant.showPrice ? "bg-emerald-100 text-emerald-700 border border-emerald-200" : "bg-slate-200 text-slate-500 border border-slate-300"
                         }`}
                       >
                         <FiDollarSign size={14} /> {variant.showPrice ? "Priced" : "Hidden"}
                       </button>
 
-                      {/* Price Input (Only visible if toggled ON) */}
                       {variant.showPrice && (
                         <div className="relative w-full sm:w-32 shrink-0">
                           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-black">Rs.</span>
                           <input 
-                            type="number" 
-                            value={variant.price} 
-                            onChange={(e) => updateVariant(i, "price", e.target.value)} 
+                            type="number" value={variant.price} onChange={(e) => updateVariant(i, "price", e.target.value)} 
                             className="w-full pl-8 pr-3 py-3 rounded-xl border border-emerald-200 bg-white focus:ring-2 focus:ring-emerald-500 font-bold text-slate-900 text-sm outline-none transition-all" 
                             placeholder="Amount" 
                           />
                         </div>
                       )}
 
-                      {/* Delete Button */}
                       {variants.length > 1 && (
-                        <button onClick={() => setVariants(variants.filter((_, idx) => idx !== i))} className="shrink-0 p-3 bg-white border border-slate-200 text-slate-400 hover:text-red-600 hover:border-red-200 hover:bg-red-50 rounded-xl transition-all shadow-sm">
+                        <button onClick={() => setVariants(variants.filter((_, idx) => idx !== i))} className="shrink-0 p-3 bg-white border border-slate-200 text-slate-400 hover:text-rose-600 hover:border-rose-200 hover:bg-rose-50 rounded-xl transition-all shadow-sm">
                           <FiTrash2 size={16}/>
                         </button>
                       )}
@@ -297,7 +324,7 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
               </AnimatePresence>
             </div>
             
-            <button onClick={() => setVariants([...variants, { unit: "", price: "", showPrice: false }])} className="mt-5 w-full flex items-center justify-center gap-2 text-indigo-600 font-bold hover:bg-indigo-50 transition-all border-2 border-dashed border-indigo-200 hover:border-indigo-400 px-4 py-4 rounded-xl text-sm">
+            <button onClick={() => setVariants([...variants, { unit: "", price: "", showPrice: false }])} className="mt-4 w-full flex items-center justify-center gap-2 text-indigo-600 font-bold hover:bg-indigo-50 transition-all border-2 border-dashed border-indigo-200 hover:border-indigo-400 px-4 py-4 rounded-xl text-sm">
               <FiPlus className="text-lg" /> Add Variant
             </button>
           </div>
@@ -316,20 +343,32 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
       <div className="w-full xl:w-[35%] xl:sticky xl:top-8 order-2 h-fit">
         <h3 className="hidden xl:flex text-xs font-black text-slate-400 uppercase tracking-widest mb-6 items-center gap-3 pl-2">
           <span className="relative flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
           </span>
           Storefront Preview
         </h3>
-        <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-slate-200/50 border border-slate-100 overflow-hidden pointer-events-none transition-all duration-300">
+        
+        <div className={`bg-white rounded-[2.5rem] shadow-2xl shadow-slate-200/50 border border-slate-100 overflow-hidden pointer-events-none transition-all duration-300 relative ${!inStock && 'opacity-75 grayscale-[0.5]'}`}>
+          
+          {!inStock && (
+            <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20 bg-rose-600 text-white font-black px-6 py-2 rounded-full shadow-2xl -rotate-12 border-4 border-white tracking-widest uppercase">
+              Out of Stock
+            </div>
+          )}
+
           <div className="relative w-full aspect-square bg-slate-50 flex items-center justify-center border-b border-slate-100 p-8 group">
             {imageUrl ? (
               <Image src={imageUrl} alt="Preview" fill className="object-contain p-8 drop-shadow-xl" />
             ) : (
               <div className="text-slate-300 flex flex-col items-center gap-4"><FiImage className="text-7xl opacity-50" /><span className="text-xs font-bold tracking-widest uppercase opacity-50">No Image</span></div>
             )}
-            <div className="absolute top-5 left-5 bg-white/90 backdrop-blur-md px-4 py-2 rounded-xl shadow-sm border border-slate-200/50 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-green-500"></span><span className="text-[10px] font-black text-slate-800 uppercase tracking-widest">{category}</span></div>
+            <div className="absolute top-5 left-5 bg-white/90 backdrop-blur-md px-4 py-2 rounded-xl shadow-sm border border-slate-200/50 flex items-center gap-2">
+              <span className={`w-2 h-2 rounded-full ${inStock ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+              <span className="text-[10px] font-black text-slate-800 uppercase tracking-widest">{category}</span>
+            </div>
           </div>
+          
           <div className="p-8">
             <h2 className="font-black text-slate-900 text-2xl leading-tight tracking-tight">{nameEn || "Product Title"}</h2>
             <p className="text-sm font-bold text-indigo-500 mt-1">{nameNp || "नेपाली नाम"}</p>
@@ -339,22 +378,22 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
               <div className="space-y-3 mt-5 opacity-30"><div className="h-2.5 bg-slate-300 rounded-full w-full"></div><div className="h-2.5 bg-slate-300 rounded-full w-4/5"></div></div>
             )}
             
-            {/* UPGRADED LIVE PREVIEW PRICING */}
+            {/* UPGRADE: PRICING RENDERER WITH NUMBER FORMATTING */}
             <div className="mt-8 pt-6 border-t border-slate-100">
               <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Available Variants</span>
               <div className="flex flex-col gap-2">
-                {variants.map((v, i) => v.unit && (
+                {variants.map((v, i) => v.unit ? (
                   <div key={i} className="flex items-center justify-between bg-slate-50 px-4 py-3 rounded-xl border border-slate-200/60">
                     <span className="text-sm font-bold text-slate-700">{v.unit}</span>
                     {v.showPrice ? (
                       <span className="text-sm font-black text-emerald-600">
-                        {v.price ? `Rs. ${v.price}` : "Rs. 0"}
+                        {v.price ? `Rs. ${Number(v.price).toLocaleString('en-IN')}` : "Rs. 0"}
                       </span>
                     ) : (
                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Call for Price</span>
                     )}
                   </div>
-                ))}
+                ) : null)}
               </div>
             </div>
           </div>
