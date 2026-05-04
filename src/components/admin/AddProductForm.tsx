@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { 
   FiUploadCloud, FiPlus, FiTrash2, FiAlertCircle, FiRefreshCw, 
   FiChevronDown, FiImage, FiStar, FiZap, FiCheckCircle, FiDollarSign,
-  FiPackage, FiInfo
+  FiPackage, FiInfo, FiEdit2, FiX
 } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
 import Image from "next/image";
 import { useInventory } from "@/context/InventoryContext"; 
+import { supabase } from "@/utils/supabase"; // <-- ADDED: Direct DB connection
 
 const CLOUDINARY_CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || "dtoyfm9xk";
 const CLOUDINARY_UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || "Rabindra-store";
@@ -34,13 +35,18 @@ const InputField = ({ label, value, onChange, placeholder, type = "text", requir
 
 // --- MAIN FORM ---
 export default function AddProductForm({ onSuccess, initialData }: any) {
-  const { addProduct, updateProduct, categories } = useInventory(); 
+  const { addProduct, updateProduct } = useInventory(); 
   
+  // LIVE TAXONOMY STATE
+  const [storeCategories, setStoreCategories] = useState<string[]>([]);
+  const [isCustomCategory, setIsCustomCategory] = useState(false);
+  const [isLoadingCategories, setIsLoadingCategories] = useState(true);
+
   const [localName, setLocalName] = useState(""); 
   const [nameEn, setNameEn] = useState(initialData?.nameEn || "");
   const [nameNp, setNameNp] = useState(initialData?.nameNp || "");
   const [description, setDescription] = useState(initialData?.description || "");
-  const [category, setCategory] = useState(initialData?.category || categories[0] || "Uncategorized");
+  const [category, setCategory] = useState(initialData?.category || "");
   const [imageUrl, setImageUrl] = useState<string | null>(initialData?.imageUrl || null);
   const [inStock, setInStock] = useState<boolean>(initialData?.inStock ?? true);
   
@@ -59,6 +65,27 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
 
   const isEditMode = !!initialData;
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // --- BUG FIX: FETCH MASTER CATEGORIES ON MOUNT ---
+  useEffect(() => {
+    const fetchMasterConfig = async () => {
+      try {
+        const { data, error } = await supabase.from('store_settings').select('data').single();
+        if (data?.data?.categories) {
+          setStoreCategories(data.data.categories);
+          // Auto-select the first category if we are making a new product
+          if (!isEditMode && data.data.categories.length > 0 && !category) {
+            setCategory(data.data.categories[0]);
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch master categories", err);
+      } finally {
+        setIsLoadingCategories(false);
+      }
+    };
+    fetchMasterConfig();
+  }, []);
 
   // --- IMAGE UPLOAD LOGIC ---
   const processImage = async (file: File) => {
@@ -95,14 +122,17 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
     setIsGeneratingLocal(true); setError("");
     try {
       const response = await fetch('/api/generate-details', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'from-local', query: localName, categories })
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'from-local', query: localName, categories: storeCategories })
       });
       if (!response.ok) throw new Error("AI Generation failed");
       const data = await response.json();
       if (data.englishName) setNameEn(data.englishName);
       if (data.nepaliName) setNameNp(data.nepaliName);
       if (data.description) setDescription(data.description);
-      if (data.category && categories.includes(data.category)) setCategory(data.category);
+      if (data.category && storeCategories.includes(data.category)) {
+        setCategory(data.category);
+        setIsCustomCategory(false);
+      }
     } catch (err) {
       setError("Could not generate details. Please try manually.");
     } finally { setIsGeneratingLocal(false); }
@@ -133,12 +163,12 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
 
   const handleSaveProduct = async () => {
     if (!nameEn) return setError("English name is required.");
+    if (!category) return setError("Please assign a category.");
     if (!imageUrl) return setError("Please upload a product photo.");
     
     const validVariants = variants.filter(v => v.unit.trim() !== "");
     if (validVariants.length === 0) return setError("Please add at least one valid packaging size/unit.");
     
-    // Validate priced variants
     const hasInvalidPrice = validVariants.some(v => v.showPrice && (!v.price || Number(v.price) <= 0));
     if (hasInvalidPrice) return setError("One or more variants are set to 'Priced' but lack a valid amount.");
     
@@ -148,7 +178,7 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
       id: isEditMode ? initialData.id : "prod_" + Date.now(), 
       nameEn, nameNp, category, description, imageUrl, inStock,
       variants: validVariants, 
-      units: validVariants.map(v => v.unit), // Backwards compatibility
+      units: validVariants.map(v => v.unit), 
     };
 
     isEditMode ? await updateProduct(productData.id, productData) : await addProduct(productData);
@@ -168,7 +198,6 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
             <p className="text-slate-500 mt-2 text-base">Configure pricing, packaging, and auto-fill details via AI.</p>
           </div>
           
-          {/* UPGRADE: Inventory Status Toggle */}
           <button 
             onClick={() => setInStock(!inStock)}
             className={`shrink-0 flex items-center gap-2 px-5 py-3 rounded-2xl font-black text-sm uppercase tracking-widest transition-all ${
@@ -218,14 +247,48 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <InputField label="Nepali Name" value={nameNp} onChange={(e: any) => setNameNp(e.target.value)} placeholder="e.g. बासमती चामल" />
+            
+            {/* UPGRADE: DYNAMIC CATEGORY DROPDOWN */}
             <div className="w-full">
               <label className="block text-sm font-bold text-slate-700 mb-2">Category</label>
-              <div className="relative">
-                <select value={category} onChange={(e) => setCategory(e.target.value)} className="w-full px-5 py-4 rounded-2xl border-2 border-slate-100 bg-slate-50/50 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50/50 outline-none transition-all font-bold text-slate-900 appearance-none cursor-pointer">
-                  {categories.map((cat: string) => <option key={cat} value={cat}>{cat}</option>)}
-                </select>
-                <FiChevronDown className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-              </div>
+              
+              {isCustomCategory ? (
+                <div className="relative">
+                  <input 
+                    type="text" value={category} onChange={(e) => setCategory(e.target.value)} autoFocus
+                    className="w-full px-5 py-4 rounded-2xl border-2 border-indigo-200 bg-indigo-50/30 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50/50 outline-none transition-all font-bold text-slate-900 pr-12" 
+                    placeholder="Type custom category..." 
+                  />
+                  <button onClick={() => { setIsCustomCategory(false); setCategory(storeCategories[0] || ""); }} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 transition-colors">
+                    <FiX size={18} />
+                  </button>
+                </div>
+              ) : (
+                <div className="relative">
+                  <select 
+                    value={category} 
+                    onChange={(e) => {
+                      if (e.target.value === "ADD_CUSTOM") {
+                        setIsCustomCategory(true);
+                        setCategory("");
+                      } else {
+                        setCategory(e.target.value);
+                      }
+                    }} 
+                    className="w-full px-5 py-4 rounded-2xl border-2 border-slate-100 bg-slate-50/50 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50/50 outline-none transition-all font-bold text-slate-900 appearance-none cursor-pointer"
+                  >
+                    {isLoadingCategories && <option value="">Loading categories...</option>}
+                    {storeCategories.map((cat: string) => <option key={cat} value={cat}>{cat}</option>)}
+                    {!isLoadingCategories && (
+                      <>
+                        <option disabled>──────────</option>
+                        <option value="ADD_CUSTOM" className="font-bold text-indigo-600">+ Add Custom Category...</option>
+                      </>
+                    )}
+                  </select>
+                  <FiChevronDown className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                </div>
+              )}
             </div>
           </div>
 
@@ -238,7 +301,7 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
         {/* STEP 3: MEDIA & VARIANT GRID */}
         <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
           
-          {/* UPGRADE: TRUE DRAG & DROP PHOTO UPLOAD */}
+          {/* DRAG & DROP PHOTO UPLOAD */}
           <div className="xl:col-span-4 bg-white p-6 md:p-8 rounded-[2rem] shadow-sm border border-slate-200/60 flex flex-col">
             <label className="block text-xs font-black text-slate-400 mb-4 uppercase tracking-widest">Product Photo *</label>
             <div 
@@ -365,7 +428,7 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
             )}
             <div className="absolute top-5 left-5 bg-white/90 backdrop-blur-md px-4 py-2 rounded-xl shadow-sm border border-slate-200/50 flex items-center gap-2">
               <span className={`w-2 h-2 rounded-full ${inStock ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
-              <span className="text-[10px] font-black text-slate-800 uppercase tracking-widest">{category}</span>
+              <span className="text-[10px] font-black text-slate-800 uppercase tracking-widest">{category || "Uncategorized"}</span>
             </div>
           </div>
           
@@ -378,7 +441,6 @@ export default function AddProductForm({ onSuccess, initialData }: any) {
               <div className="space-y-3 mt-5 opacity-30"><div className="h-2.5 bg-slate-300 rounded-full w-full"></div><div className="h-2.5 bg-slate-300 rounded-full w-4/5"></div></div>
             )}
             
-            {/* UPGRADE: PRICING RENDERER WITH NUMBER FORMATTING */}
             <div className="mt-8 pt-6 border-t border-slate-100">
               <span className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Available Variants</span>
               <div className="flex flex-col gap-2">
